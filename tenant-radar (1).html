@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>租客雷達 v4 — 真實數據 + Gemini AI</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ── RESET & TOKENS ─────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0b0d10;--surf:#111318;--panel:#161a21;--card:#1a1e27;
+  --b1:#1e2430;--b2:#242d3b;--b3:#2c3749;
+  --grn:#00e87a;--gd:#00b85f;--gb:#00e87a0d;
+  --amb:#ffb020;--ab:#ffb0200d;
+  --red:#ff4d4d;--rb:#ff4d4d0d;
+  --blu:#4da6ff;--bb:#4da6ff0d;
+  --pur:#a78bfa;--pb:#a78bfa0d;--pd:#7c3aed;
+  --txt:#d8e0ed;--mut:#566070;--dim:#2e3848;
+}
+html,body{height:100%;overflow:hidden}
+body{font-family:'Noto Sans TC',sans-serif;background:var(--bg);color:var(--txt);font-size:13px;line-height:1.5}
+
+/* ── TOPBAR ─────────────────────────────────────────────── */
+.bar{height:50px;background:var(--surf);border-bottom:1px solid var(--b2);display:flex;align-items:center;padding:0 14px;gap:8px;flex-shrink:0;position:relative;z-index:50}
+.logo{display:flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:14px}
+.ld{width:8px;height:8px;border-radius:50%;background:var(--grn);box-shadow:0 0 8px var(--grn);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 5px var(--grn)}50%{box-shadow:0 0 14px var(--grn),0 0 24px var(--gd)}}
+.ver{color:var(--mut);font-size:10px;font-weight:400}
+.bar-r{margin-left:auto;display:flex;align-items:center;gap:5px}
+.clk{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mut)}
+/* status pills */
+.sp{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:20px;font-size:10px;font-family:'IBM Plex Mono',monospace;border:1px solid;white-space:nowrap;transition:all .2s}
+.sp .dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
+.sp.live{border-color:var(--gd);color:var(--grn);background:var(--gb)}
+.sp.dead{border-color:var(--b3);color:var(--mut);background:transparent}
+.sp.ws  {border-color:#1d4ed8;color:var(--blu);background:var(--bb)}
+.sp.ai  {border-color:var(--pd);color:var(--pur);background:var(--pb)}
+.sp.err {border-color:var(--red);color:var(--red);background:var(--rb)}
+.sp.live .dot,.sp.ws .dot,.sp.ai .dot{animation:pulse 1.4s infinite}
+.btn{padding:3px 10px;border:1px solid var(--b3);border-radius:5px;background:transparent;color:var(--mut);font-size:10px;cursor:pointer;font-family:'IBM Plex Mono',monospace;transition:all .15s}
+.btn:hover{border-color:var(--red);color:var(--red)}
+.btn.g:hover{border-color:var(--gd);color:var(--grn)}
+.btn.amber:hover{border-color:var(--amb);color:var(--amb)}
+
+/* ── 3-COLUMN GRID ──────────────────────────────────────── */
+.grid{display:grid;grid-template-columns:244px 1fr 300px;height:calc(100vh - 50px);overflow:hidden}
+
+/* ── STAT ROW ───────────────────────────────────────────── */
+.stats{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid var(--b2);flex-shrink:0}
+.st{padding:9px 14px;border-right:1px solid var(--b2)}
+.st:last-child{border-right:none}
+.stl{font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px}
+.stv{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;line-height:1;margin-bottom:2px}
+.stv.g{color:var(--grn)}.stv.b{color:var(--blu)}.stv.p{color:var(--pur)}.stv.a{color:var(--amb)}
+.std{font-size:9px;color:var(--mut);font-family:'IBM Plex Mono',monospace}
+.std.g{color:var(--grn)}
+
+/* ── LEFT SIDEBAR ───────────────────────────────────────── */
+.side{background:var(--surf);border-right:1px solid var(--b2);overflow-y:auto;display:flex;flex-direction:column}
+.sh{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.12em;color:var(--mut);text-transform:uppercase;padding:11px 14px 5px}
+/* channel rows */
+.ch{display:flex;align-items:center;gap:7px;padding:6px 14px;cursor:pointer;transition:background .12s;position:relative}
+.ch:hover,.ch.on{background:var(--panel)}
+.ch.on::before{content:'';position:absolute;left:0;top:16%;bottom:16%;width:2px;background:var(--grn);border-radius:0 2px 2px 0}
+.ico{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.ico-a{background:#1877f21a}.ico-p{background:#3cba541a}.ico-d{background:#ff65651a}.ico-5{background:#ff8c001a}
+.ci{flex:1;min-width:0}
+.cn{font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cs{font-size:9px;color:var(--mut)}
+.cbadge{font-family:'IBM Plex Mono',monospace;font-size:9px;padding:1px 6px;border-radius:10px;flex-shrink:0}
+.cbadge.on{background:var(--gb);color:var(--grn);border:1px solid var(--gd)}
+.cbadge.off{background:transparent;color:var(--mut);border:1px solid var(--b3)}
+
+/* ── FILTER PANEL (核心新功能②) ─────────────────────────── */
+.fp{padding:4px 14px 0}
+.fr{margin-bottom:7px}
+.fl{font-size:9px;color:var(--mut);margin-bottom:3px;display:block;font-family:'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.05em}
+.fs,.fi{width:100%;padding:5px 7px;background:var(--panel);border:1px solid var(--b3);border-radius:5px;color:var(--txt);font-size:11px;font-family:'IBM Plex Mono',monospace;outline:none}
+.fs:focus,.fi:focus{border-color:var(--gd)}
+.frange{display:flex;gap:4px;align-items:center}
+.frange .fi{flex:1}
+.fsep{color:var(--dim);font-size:10px}
+/* toggles */
+.trow{display:flex;align-items:center;justify-content:space-between;padding:4px 14px;font-size:10px;color:var(--mut)}
+.tg{position:relative;width:28px;height:15px;cursor:pointer;flex-shrink:0}
+.tg input{opacity:0;width:0;height:0}
+.ttrack{position:absolute;inset:0;border-radius:8px;background:var(--b3);transition:background .2s}
+.tg input:checked+.ttrack{background:var(--gd)}
+.tthumb{position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;background:var(--mut);transition:transform .2s,background .2s}
+.tg input:checked~.tthumb{transform:translateX(13px);background:#fff}
+/* my props */
+.mpw{padding:5px 14px}
+.mpc{padding:7px 9px;background:var(--panel);border:1px solid var(--b3);border-radius:5px;margin-bottom:5px}
+.mps{font-size:9px;font-family:'IBM Plex Mono',monospace;margin-bottom:2px}
+.mps.g{color:var(--grn)}.mps.a{color:var(--amb)}
+.mpn{font-size:11px;font-weight:500}
+.mpp{font-size:9px;color:var(--mut)}
+
+/* ── FEED ───────────────────────────────────────────────── */
+.feed{overflow-y:auto;background:var(--bg);display:flex;flex-direction:column}
+/* scan bar */
+.sbar{padding:6px 14px;display:flex;align-items:center;gap:7px;font-size:10px;font-family:'IBM Plex Mono',monospace;color:var(--mut);border-bottom:1px solid var(--b2);background:var(--surf);flex-shrink:0}
+.strk{flex:1;height:2px;background:var(--b3);border-radius:2px;overflow:hidden}
+.swave{height:100%;background:linear-gradient(90deg,transparent,var(--grn),transparent);width:40%;animation:wave 2.4s ease-in-out infinite}
+@keyframes wave{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
+.ssrc{color:var(--grn);font-size:10px;min-width:160px}
+/* feed header */
+.fhdr{padding:9px 14px 7px;border-bottom:1px solid var(--b2);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--bg);z-index:10;flex-shrink:0}
+.fttl{font-size:11px;font-family:'IBM Plex Mono',monospace;color:var(--mut)}
+.fttl strong{color:var(--txt)}
+.fctrls{display:flex;gap:4px}
+.vb{padding:3px 8px;border:1px solid var(--b3);border-radius:4px;background:transparent;color:var(--mut);font-size:10px;font-family:'IBM Plex Mono',monospace;cursor:pointer;transition:all .12s}
+.vb:hover,.vb.on{border-color:var(--gd);color:var(--grn);background:var(--gb)}
+.scanb{padding:3px 8px;border:1px solid var(--b3);border-radius:4px;background:transparent;color:var(--mut);font-size:10px;font-family:'IBM Plex Mono',monospace;cursor:pointer;transition:all .12s}
+.scanb:hover{border-color:var(--amb);color:var(--amb)}
+/* lead list */
+.llist{padding:8px 10px;display:flex;flex-direction:column;gap:8px}
+
+/* ── LEAD CARD ──────────────────────────────────────────── */
+.lc{background:var(--card);border:1px solid var(--b1);border-radius:8px;overflow:hidden;transition:border-color .15s,box-shadow .15s}
+.lc:hover{border-color:var(--b3);box-shadow:0 4px 18px rgba(0,0,0,.35)}
+.lc.hot{border-color:var(--gd)}
+.lc.ai-done{border-left:2px solid var(--pd)}
+.lc.fresh{animation:flash .5s ease}
+@keyframes flash{0%{background:#041a0c}100%{background:var(--card)}}
+/* card top */
+.ctop{padding:10px 11px;display:flex;align-items:flex-start;gap:8px}
+.cbody{flex:1;min-width:0}
+.cmeta{display:flex;align-items:center;gap:4px;margin-bottom:4px;flex-wrap:wrap}
+.csrc{font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--mut)}
+.cgrp{font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--dim)}
+.ctm{font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--dim)}
+/* inline badges */
+.tag{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-family:'IBM Plex Mono',monospace;font-weight:600;line-height:1.4}
+.tag.new{background:var(--grn);color:#000;letter-spacing:.04em}
+.tag.real{background:var(--bb);color:var(--blu);border:1px solid #1d4ed833}
+.tag.aiok{background:var(--pb);color:var(--pur);border:1px solid #7c3aed33}
+/* score ring */
+.cscore{margin-left:auto;display:flex;align-items:center;gap:4px;flex-shrink:0}
+.snum{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600}
+.snum.hi{color:var(--grn)}.snum.md{color:var(--amb)}.snum.lo{color:var(--mut)}
+.sring svg{transform:rotate(-90deg)}
+/* card text */
+.ctxt{font-size:12px;line-height:1.55;color:var(--txt);margin-bottom:5px}
+.ctxt .h{color:var(--grn);font-weight:500}
+.ctxt .ex{font-size:10px;color:var(--mut);display:block;margin-top:2px;line-height:1.5}
+/* chips row */
+.chips{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:5px}
+.chip{padding:1px 6px;border-radius:3px;font-size:9px;font-family:'IBM Plex Mono',monospace;background:var(--panel);border:1px solid var(--b3);color:var(--mut)}
+.chip.m{background:var(--gb);border-color:var(--gd);color:var(--grn)}
+.chip.ai{background:var(--pb);border-color:#7c3aed33;color:var(--pur)}
+
+/* ── SOURCE LINK (核心新功能①) ─────────────────────────── */
+.srclink{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--blu);text-decoration:none;padding:1px 7px;border:1px solid #1d4ed822;border-radius:3px;background:var(--bb);transition:all .15s}
+.srclink:hover{border-color:var(--blu);color:#93c5fd;background:transparent}
+
+/* ── GEMINI AI BLOCK (核心新功能③) ─────────────────────── */
+.aibox{margin:0 11px 8px;padding:9px 11px;background:#09071a;border:1px solid #7c3aed1a;border-left:2px solid var(--pd);border-radius:6px}
+.aihdr{display:flex;align-items:center;gap:5px;margin-bottom:6px;font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--pur);font-weight:600;letter-spacing:.04em}
+.aisp{width:10px;height:10px;border:2px solid #7c3aed22;border-top-color:var(--pur);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.aitxt{font-size:11px;color:#c4b5fd;line-height:1.65;white-space:pre-wrap}
+.airow{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+.aibtn-sm{padding:2px 8px;border:1px solid #7c3aed22;border-radius:10px;background:transparent;color:var(--pur);font-size:9px;font-family:'IBM Plex Mono',monospace;cursor:pointer;transition:all .12s}
+.aibtn-sm:hover{background:var(--pb);border-color:var(--pd)}
+
+/* card bottom */
+.cbot{padding:7px 11px;border-top:1px solid var(--b2);display:flex;align-items:center;gap:5px}
+.nbtn{flex:1;padding:6px;border:1px solid var(--gd);border-radius:5px;background:var(--gb);color:var(--grn);font-size:10px;font-weight:600;cursor:pointer;font-family:'IBM Plex Mono',monospace;transition:all .12s;text-align:center}
+.nbtn:hover{background:var(--grn);color:#000}
+.nbtn.done{border-color:var(--dim);background:transparent;color:var(--dim);cursor:default}
+.aibtn{padding:6px 9px;border:1px solid #7c3aed22;border-radius:5px;background:var(--pb);color:var(--pur);font-size:10px;cursor:pointer;font-family:'IBM Plex Mono',monospace;transition:all .12s;white-space:nowrap}
+.aibtn:hover{background:var(--pur);color:#000}
+.aibtn:disabled{opacity:.3;cursor:not-allowed}
+.skbtn{padding:6px 8px;border:1px solid var(--b3);border-radius:5px;background:transparent;color:var(--mut);font-size:10px;cursor:pointer;font-family:'IBM Plex Mono',monospace;transition:all .12s}
+.skbtn:hover{border-color:var(--red);color:var(--red)}
+
+/* ── RIGHT PANEL ────────────────────────────────────────── */
+.rp{background:var(--surf);border-left:1px solid var(--b2);overflow-y:auto;display:flex;flex-direction:column}
+.rps{padding:12px 13px;border-bottom:1px solid var(--b2)}
+.rph{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.1em;color:var(--mut);text-transform:uppercase;margin-bottom:9px;display:flex;align-items:center;gap:5px}
+.rbadge{padding:1px 5px;border-radius:3px;font-size:8px}
+.rbadge.grn{background:var(--gb);color:var(--grn);border:1px solid var(--gd)}
+.rbadge.pur{background:var(--pb);color:var(--pur);border:1px solid #7c3aed33}
+.rbadge.red{background:var(--rb);color:var(--red);border:1px solid var(--red)}
+/* backend config */
+.berow{display:flex;gap:4px;margin-bottom:5px}
+.beinp{flex:1;padding:5px 7px;background:var(--panel);border:1px solid var(--b3);border-radius:5px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--txt);outline:none}
+.beinp:focus{border-color:var(--gd)}
+.bebtn{padding:5px 9px;background:var(--gb);border:1px solid var(--gd);border-radius:5px;color:var(--grn);font-size:10px;cursor:pointer;font-family:'IBM Plex Mono',monospace;transition:all .12s;white-space:nowrap}
+.bebtn:hover{background:var(--grn);color:#000}
+.hint{font-size:9px;color:var(--dim);line-height:1.7}
+.hint code{font-family:'IBM Plex Mono',monospace;color:#94a3b8;background:var(--panel);padding:0 4px;border-radius:3px;font-size:9px}
+.hint a{color:var(--blu)}
+/* gemini config */
+.gcst{display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--panel);border:1px solid var(--b3);border-radius:5px;margin-bottom:5px}
+.gcdot{width:6px;height:6px;border-radius:50%;background:var(--dim);flex-shrink:0;transition:background .3s}
+.gcdot.on{background:var(--pur);animation:pulse 2s infinite}
+.gclb{flex:1;font-size:11px}
+.gcval{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--mut)}
+.grow{display:flex;gap:4px;margin-bottom:5px}
+.ginp{flex:1;padding:5px 7px;background:var(--panel);border:1px solid var(--b3);border-radius:5px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--txt);outline:none}
+.ginp:focus{border-color:var(--pd)}
+.ginp::placeholder{color:var(--dim)}
+.gbtn{padding:5px 9px;background:var(--pb);border:1px solid #7c3aed33;border-radius:5px;color:var(--pur);font-size:10px;cursor:pointer;font-family:'IBM Plex Mono',monospace;transition:all .12s;white-space:nowrap}
+.gbtn:hover{background:var(--pur);color:#000}
+.msel{width:100%;padding:5px 7px;background:var(--panel);border:1px solid var(--b3);border-radius:5px;color:var(--txt);font-size:10px;font-family:'IBM Plex Mono',monospace;outline:none;margin-bottom:5px}
+.msel:focus{border-color:var(--pd)}
+.batchbtn{width:100%;padding:6px;border:1px solid #7c3aed22;border-radius:5px;background:transparent;color:var(--pur);font-size:10px;cursor:pointer;font-family:'IBM Plex Mono',monospace;transition:all .12s;margin-top:5px}
+.batchbtn:hover{background:var(--pb)}
+/* keywords */
+.kwl{display:flex;flex-direction:column;gap:3px;margin-bottom:6px}
+.kwi{display:flex;align-items:center;gap:5px;padding:4px 8px;background:var(--panel);border:1px solid var(--b3);border-radius:4px;font-size:10px;font-family:'IBM Plex Mono',monospace}
+.kwd{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.kwd.g{background:var(--grn)}.kwd.a{background:var(--amb)}
+.kwt{flex:1;color:var(--txt)}.kwc{color:var(--mut);font-size:9px}
+.kwrm{color:var(--dim);cursor:pointer;background:none;border:none;font-size:13px;line-height:1;padding:0 1px}
+.kwrm:hover{color:var(--red)}
+.addrow{display:flex;gap:4px}
+.kwip{flex:1;padding:5px 7px;background:var(--panel);border:1px solid var(--b3);border-radius:4px;font-size:10px;font-family:'IBM Plex Mono',monospace;color:var(--txt);outline:none}
+.kwip:focus{border-color:var(--gd)}
+.kwip::placeholder{color:var(--dim)}
+.kwadd{padding:5px 9px;background:var(--gb);border:1px solid var(--gd);border-radius:4px;color:var(--grn);font-size:10px;font-family:'IBM Plex Mono',monospace;cursor:pointer;transition:all .12s}
+.kwadd:hover{background:var(--grn);color:#000}
+/* notify */
+.nr{display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background:var(--panel);border:1px solid var(--b3);border-radius:5px;font-size:10px;margin-bottom:4px}
+.nrl{display:flex;align-items:center;gap:6px}
+.nrico{font-size:13px}.nrlb{color:var(--txt)}.nrsb{font-size:9px;color:var(--mut)}
+.nrst{font-family:'IBM Plex Mono',monospace;font-size:9px}
+.nrst.on{color:var(--grn)}.nrst.off{color:var(--mut)}
+.ntbtn{width:100%;padding:6px;border:1px solid var(--gd);border-radius:5px;background:var(--gb);color:var(--grn);font-size:10px;cursor:pointer;font-family:'IBM Plex Mono',monospace;transition:all .12s;margin-top:4px}
+.ntbtn:hover{background:var(--grn);color:#000}
+/* log */
+.logwrap{display:flex;flex-direction:column}
+.logi{display:flex;gap:6px;padding:5px 0;border-bottom:1px solid var(--b2);font-size:10px;align-items:flex-start}
+.logi:last-child{border-bottom:none}
+.logt{font-family:'IBM Plex Mono',monospace;color:var(--dim);flex-shrink:0;width:38px;font-size:9px;padding-top:1px}
+.logd{width:5px;height:5px;border-radius:50%;margin-top:3px;flex-shrink:0}
+.logd.g{background:var(--grn)}.logd.a{background:var(--amb)}.logd.b{background:var(--blu)}.logd.p{background:var(--pur)}.logd.r{background:var(--red)}
+.logm{color:var(--mut);line-height:1.5}.logm strong{color:var(--txt)}
+
+/* ── OFFLINE BANNER ─────────────────────────────────────── */
+.offb{display:none;padding:5px 14px;background:#180808;border-bottom:1px solid var(--red);font-size:10px;font-family:'IBM Plex Mono',monospace;color:var(--red);grid-column:1/-1}
+
+/* ── TOASTS ─────────────────────────────────────────────── */
+.toasts{position:fixed;bottom:14px;right:14px;z-index:9999;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+.toast{padding:9px 12px;border-radius:8px;font-size:11px;font-family:'IBM Plex Mono',monospace;display:flex;align-items:center;gap:7px;max-width:290px;pointer-events:auto;animation:tin .25s ease;border:1px solid}
+@keyframes tin{from{transform:translateX(110%);opacity:0}to{transform:translateX(0);opacity:1}}
+.toast.tg{background:#061209;border-color:var(--gd)}.toast.tg .ttl{color:var(--grn)}
+.toast.tp{background:#080614;border-color:#7c3aed44}.toast.tp .ttl{color:var(--pur)}
+.toast.tr{background:#120606;border-color:var(--red)}.toast.tr .ttl{color:var(--red)}
+.toast.tb{background:#060c18;border-color:#1d4ed8}.toast.tb .ttl{color:var(--blu)}
+.tico{font-size:14px;flex-shrink:0}
+.tbod{flex:1}.ttl{font-weight:600;margin-bottom:1px;font-size:10px}
+.tdsc{font-size:9px;color:var(--mut);line-height:1.4}
+
+/* ── EMPTY STATE ────────────────────────────────────────── */
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--dim);gap:8px;padding:2.5rem;text-align:center}
+.eico{font-size:2.2rem;opacity:.3}.emsg{font-size:11px;line-height:1.8}
+
+/* FB group list */
+.grp-item{display:flex;align-items:center;gap:5px;padding:4px 8px;background:var(--panel);border:1px solid var(--b3);border-radius:5px;font-size:10px;font-family:'IBM Plex Mono',monospace}
+.grp-ico{font-size:11px;flex-shrink:0}
+.grp-name{flex:1;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grp-src{font-size:8px;padding:1px 4px;border-radius:3px;flex-shrink:0}
+.grp-src.builtin{background:var(--bb);color:var(--blu);border:1px solid #1d4ed822}
+.grp-src.custom{background:var(--gb);color:var(--grn);border:1px solid var(--gd)}
+.grp-del{color:var(--dim);cursor:pointer;background:none;border:none;font-size:13px;line-height:1;padding:0 2px;flex-shrink:0}
+.grp-del:hover{color:var(--red)}
+.grp-del:disabled{opacity:.3;cursor:not-allowed}
+
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--b3);border-radius:3px}
+@media(max-width:1100px){.grid{grid-template-columns:220px 1fr}.rp{display:none}.stats{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:680px){.grid{grid-template-columns:1fr}.side{display:none}}
+</style>
+</head>
+<body>
+
+<!-- ── TOP BAR ─────────────────────────────────────────── -->
+<div class="bar">
+  <div class="logo"><div class="ld"></div><span>租客雷達</span><span class="ver">v4</span></div>
+  <div class="bar-r">
+    <span class="clk" id="clk">--:--:--</span>
+    <div class="sp dead" id="ws-sp"><div class="dot"></div><span id="ws-lb">連線中…</span></div>
+    <div class="sp dead" id="ai-sp"><div class="dot"></div><span id="ai-lb">Gemini</span></div>
+    <div class="sp live" id="rd-sp"><div class="dot"></div><span id="rd-lb">運行中</span></div>
+    <button class="btn" id="stop-btn" onclick="toggleRadar()">暫停</button>
+    <button class="btn g" onclick="triggerScan()">↺ 掃描</button>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="offb" id="offb">
+    ⚠ 後端離線 — <span id="offb-url">http://localhost:3001</span> 未回應，請啟動 server.js
+  </div>
+
+  <!-- STAT ROW -->
+  <div class="stats">
+    <div class="st"><div class="stl">偵測總數</div><div class="stv g" id="s0">0</div><div class="std g">↑ 真實數據</div></div>
+    <div class="st"><div class="stl">高匹配 ≥80%</div><div class="stv g" id="s1">0</div><div class="std">符合您物件</div></div>
+    <div class="st"><div class="stl">AI 已分析</div><div class="stv p" id="s2">0</div><div class="std">Gemini</div></div>
+    <div class="st"><div class="stl">已推播</div><div class="stv b" id="s3">0</div><div class="std">本次工作階段</div></div>
+    <div class="st"><div class="stl">來源平台</div><div class="stv a" id="s4">0</div><div class="std">PTT/Dcard/591…</div></div>
+  </div>
+
+  <!-- LEFT SIDEBAR -->
+  <aside class="side">
+    <div class="sh">監控頻道</div>
+    <div class="ch on" onclick="setSrc('all',this)"><div class="ico ico-a">📡</div><div class="ci"><div class="cn">全部來源</div><div class="cs">所有平台</div></div><div class="cbadge on" id="b-all">0</div></div>
+    <div class="ch" onclick="setSrc('ptt',this)"><div class="ico ico-p">💬</div><div class="ci"><div class="cn">PTT 租屋版</div><div class="cs">rent / Rent_tpe</div></div><div class="cbadge off" id="b-ptt">0</div></div>
+    <div class="ch" onclick="setSrc('dcard',this)"><div class="ico ico-d">🃏</div><div class="ci"><div class="cn">Dcard 租屋</div><div class="cs">官方公開 JSON API</div></div><div class="cbadge off" id="b-dcard">0</div></div>
+    <div class="ch" onclick="setSrc('591',this)"><div class="ico ico-5">🏠</div><div class="ci"><div class="cn">591 求租板</div><div class="cs">公開 HTML 爬取</div></div><div class="cbadge off" id="b-591">0</div></div>
+    <div class="ch" onclick="setSrc('fb',this)"><div class="ico ico-a">📘</div><div class="ci"><div class="cn">Facebook 社團</div><div class="cs">需 Graph API Token</div></div><div class="cbadge off" id="b-fb">0</div></div>
+
+    <!-- ② 進階篩選面板 -->
+    <div class="sh" style="margin-top:6px">進階篩選</div>
+    <div class="fp">
+      <div class="fr"><label class="fl">區域</label>
+        <select class="fs" id="fa" onchange="applyF()">
+          <option value="">全部區域</option>
+          <option>信義區</option><option>大安區</option><option>內湖區</option>
+          <option>中山區</option><option>南港區</option><option>松山區</option>
+          <option>文山區</option><option>板橋</option><option>新莊</option><option>中和</option>
+        </select>
+      </div>
+      <div class="fr"><label class="fl">房型</label>
+        <select class="fs" id="ft" onchange="applyF()">
+          <option value="">全部房型</option>
+          <option>套房</option><option>1房</option><option>2房</option><option>3房</option><option>不限</option>
+        </select>
+      </div>
+      <div class="fr"><label class="fl">預算（元/月）</label>
+        <div class="frange">
+          <input class="fi" type="number" id="fmin" placeholder="最低" onchange="applyF()">
+          <span class="fsep">—</span>
+          <input class="fi" type="number" id="fmax" placeholder="最高" onchange="applyF()">
+        </div>
+      </div>
+      <div class="fr"><label class="fl">最低匹配度</label>
+        <select class="fs" id="fsc" onchange="applyF()">
+          <option value="0">不限</option><option value="60">60%+</option>
+          <option value="75">75%+</option><option value="85">85%+</option>
+        </select>
+      </div>
+    </div>
+    <div class="trow"><span>只看高匹配（≥80%）</span><label class="tg"><input type="checkbox" id="t1" onchange="applyF()"><div class="ttrack"></div><div class="tthumb"></div></label></div>
+    <div class="trow"><span>只看 AI 已分析</span><label class="tg"><input type="checkbox" id="t2" onchange="applyF()"><div class="ttrack"></div><div class="tthumb"></div></label></div>
+    <div class="trow"><span>排除已推播</span><label class="tg"><input type="checkbox" id="t3" checked onchange="applyF()"><div class="ttrack"></div><div class="tthumb"></div></label></div>
+
+    <div class="sh" style="margin-top:6px">我的物件</div>
+    <div class="mpw" id="mpw"></div>
+  </aside>
+
+  <!-- FEED -->
+  <main class="feed">
+    <div class="sbar">
+      <span>掃描中</span>
+      <span class="ssrc" id="ssrc">等待連線…</span>
+      <div class="strk"><div class="swave"></div></div>
+      <span id="scnt" style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--mut)">0 筆</span>
+    </div>
+    <div class="fhdr">
+      <div class="fttl">偵測到 <strong id="fcnt">0</strong> 筆租屋需求</div>
+      <div class="fctrls">
+        <button class="vb on" onclick="setView('all',this)">全部</button>
+        <button class="vb" onclick="setView('hot',this)">🔥 高匹配</button>
+        <button class="vb" onclick="setView('new',this)">🆕 最新</button>
+        <button class="vb" onclick="setView('ai',this)">✦ AI分析</button>
+        <button class="scanb" onclick="triggerScan()">↺ 立即掃描</button>
+      </div>
+    </div>
+    <div class="llist" id="llist">
+      <div class="empty">
+        <div class="eico">📡</div>
+        <div class="emsg">等待後端連線…<br>在右側輸入後端 URL 並點擊「連線」<br>或直接啟動 <code style="font-family:IBM Plex Mono,monospace;color:#94a3b8;font-size:10px">node server.js</code></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- RIGHT PANEL -->
+  <aside class="rp">
+
+    <!-- Backend config -->
+    <div class="rps">
+      <div class="rph">🖥 後端伺服器 <span class="rbadge red" id="be-badge">離線</span></div>
+      <div class="berow">
+        <input class="beinp" type="text" id="be-url" value="http://localhost:3001" placeholder="http://localhost:3001">
+        <button class="bebtn" onclick="connectBackend()">連線</button>
+      </div>
+      <div class="hint">
+        啟動後端：<code>npm install && node server.js</code><br>
+        或 Docker：<code>docker-compose up -d</code><br>
+        後端爬取 PTT、Dcard、591 真實數據，<br>透過 WebSocket 即時推播至此介面。
+      </div>
+    </div>
+
+    <!-- ③ Gemini AI 設定 -->
+    <div class="rps">
+      <div class="rph">✦ Gemini AI <span class="rbadge pur" id="gm-badge">未設定</span></div>
+      <div class="gcst">
+        <div class="gcdot" id="gcdot"></div>
+        <div class="gclb">API 連線狀態</div>
+        <div class="gcval" id="gcval">離線</div>
+      </div>
+      <div class="grow">
+        <input class="ginp" type="password" id="gkey" placeholder="貼上 Gemini API Key…">
+        <button class="gbtn" onclick="saveGemini()">連線</button>
+      </div>
+      <select class="msel" id="gmodel">
+        <option value="gemini-2.0-flash">gemini-2.0-flash（推薦）</option>
+        <option value="gemini-1.5-pro">gemini-1.5-pro（精準）</option>
+        <option value="gemini-1.5-flash">gemini-1.5-flash（快速）</option>
+      </select>
+      <div class="hint">
+        免費取得：<a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com ↗</a><br>
+        ✦ 高匹配需求會自動觸發 AI 分析<br>
+        ✦ 分析內容：意願強度、預算評估、物件推薦、LINE 回覆訊息
+      </div>
+      <button class="batchbtn" onclick="batchAnalyze()">✦ 批次分析高匹配需求（前5筆）</button>
+    </div>
+
+    <!-- FB 社團管理 -->
+    <div class="rps">
+      <div class="rph">📘 Facebook 社團 <span class="rbadge grn" id="grp-badge">18 個</span></div>
+      <!-- 新增社團 -->
+      <div class="grow" style="margin-bottom:5px">
+        <input class="ginp" type="text" id="grp-inp"
+          placeholder="貼上社團網址… facebook.com/groups/…"
+          onkeydown="if(event.key==='Enter')addGroup()">
+        <button class="gbtn" onclick="addGroup()">新增</button>
+      </div>
+      <div class="hint" style="margin-bottom:7px">
+        內建 18 個雙北租屋社團，可手動新增更多。<br>
+        需設定 <code>FB_ACCESS_TOKEN</code> 才會爬取。
+      </div>
+      <!-- 社團列表 -->
+      <div id="grp-list" style="display:flex;flex-direction:column;gap:3px;max-height:200px;overflow-y:auto"></div>
+    </div>
+
+    <!-- Keywords -->
+    <div class="rps">
+      <div class="rph">搜尋關鍵字</div>
+      <div class="kwl" id="kwl"></div>
+      <div class="addrow">
+        <input class="kwip" type="text" id="kwip" placeholder="新增關鍵字…" onkeydown="if(event.key==='Enter')addKw()">
+        <button class="kwadd" onclick="addKw()">＋</button>
+      </div>
+    </div>
+
+    <!-- Notify -->
+    <div class="rps">
+      <div class="rph">推播設定</div>
+      <div class="nr"><div class="nrl"><span class="nrico">📱</span><div><div class="nrlb">LINE 通知</div><div class="nrsb">即時推播</div></div></div><div class="nrst on">已啟用</div></div>
+      <div class="nr"><div class="nrl"><span class="nrico">🔔</span><div><div class="nrlb">瀏覽器通知</div><div class="nrsb">桌面彈窗</div></div></div><div class="nrst on">已啟用</div></div>
+      <div class="nr"><div class="nrl"><span class="nrico">📧</span><div><div class="nrlb">Email 匯總</div><div class="nrsb">每日 08:00</div></div></div><div class="nrst off">未設定</div></div>
+      <button class="ntbtn" onclick="testNotif()">測試瀏覽器通知</button>
+    </div>
+
+    <!-- Log -->
+    <div class="rps" style="flex:1">
+      <div class="rph">系統紀錄</div>
+      <div class="logwrap" id="logwrap"></div>
+    </div>
+
+  </aside>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let BE    = 'http://localhost:3001';
+let WS    = 'ws://localhost:3001';
+let ws    = null;
+let wsOK  = false;
+let radar = true;
+let gKey  = '';
+let gMdl  = 'gemini-2.0-flash';
+let gOK   = false;
+
+const LEADS = [];   // all leads, newest-first
+let view  = 'all';
+let src   = 'all';
+let nCnt  = 0, aiCnt = 0;
+let sIdx  = 0;
+
+const MY_PROPS = [
+  { area:'信義區', price:38000, type:'2房', tags:['含家具','近捷運','可養寵物'] },
+  { area:'南港區', price:28000, type:'套房', tags:['近捷運'] },
+];
+
+const SRCS = ['PTT · rent 版','PTT · Rent_tpe','Dcard · 租屋版','591 · 求租板','Facebook · 社團'];
+
+// ═══════════════════════════════════════════════════════════
+// WEBSOCKET
+// ═══════════════════════════════════════════════════════════
+function connectBackend() {
+  BE  = (document.getElementById('be-url').value.trim() || 'http://localhost:3001').replace(/\/$/, '');
+  WS  = BE.replace(/^http/, 'ws');
+  document.getElementById('offb-url').textContent = BE;
+  openWS();
+  fetchLeads();
+}
+
+function openWS() {
+  try { if (ws) ws.close(); } catch(_){}
+  log('b', `連線 ${WS}…`);
+  ws = new WebSocket(WS);
+
+  ws.onopen = () => {
+    wsOK = true;
+    setSp('ws-sp', 'ws', '✓ 後端已連線');
+    document.getElementById('offb').style.display = 'none';
+    setBadge('be-badge', 'grn', '已連線');
+    log('g', '後端 WebSocket 連線成功');
+    toast('tb', '🔌', '後端已連線', BE);
+    loadGroups();  // 連線後自動載入社團清單
+  };
+
+  ws.onmessage = e => { try { onWS(JSON.parse(e.data)); } catch(_){} };
+
+  ws.onerror = () => {
+    wsOK = false;
+    setSp('ws-sp', 'err', '連線失敗');
+    document.getElementById('offb').style.display = 'block';
+    setBadge('be-badge', 'red', '離線');
+    log('r', '後端連線失敗，請確認 server.js 已啟動');
+  };
+
+  ws.onclose = () => {
+    wsOK = false;
+    setSp('ws-sp', 'dead', '已斷線');
+    if (radar) setTimeout(openWS, 9000);
+  };
+}
+
+function onWS(m) {
+  switch (m.type) {
+    case 'connected':   log('g', m.message); break;
+    case 'bulk_leads':  m.leads.forEach(l => ingest(l, false)); log('g', `載入 <strong>${m.leads.length}</strong> 筆歷史數據`); break;
+    case 'new_lead':    ingest(m.lead, true); break;
+    case 'ai_update': {
+      const l = LEADS.find(x => x.id === m.id);
+      if (l) { l.aiAnalysis = m.aiAnalysis; aiCnt++; document.getElementById('s2').textContent = aiCnt; log('p', `AI 完成：<strong>${l.area} ${l.type}</strong>`); render(); }
+      break;
+    }
+    case 'groups_updated':
+      document.getElementById('grp-badge').textContent = `${m.total} 個`;
+      loadGroups();
+      break;
+    case 'scan_start': document.getElementById('ssrc').textContent = SRCS[sIdx++ % SRCS.length]; log('b', '後端掃描中…'); break;
+    case 'scan_done':  log('g', `掃描完成：+<strong>${m.newCount}</strong> 筆（共 ${m.totalCount}）`); stats(); break;
+    case 'scan_error': log('r', `掃描錯誤：${m.message}`); break;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// REST
+// ═══════════════════════════════════════════════════════════
+async function fetchLeads() {
+  try {
+    const r = await fetch(`${BE}/api/leads`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    LEADS.length = 0;
+    d.leads.forEach(l => ingest(l, false));
+    log('g', `REST 載入 <strong>${d.count}</strong> 筆`);
+  } catch (e) { log('r', `REST 失敗：${e.message}`); }
+}
+
+async function triggerScan() {
+  if (!wsOK) { toast('tr', '❌', '後端未連線', '請先設定並連線後端'); return; }
+  try {
+    await fetch(`${BE}/api/scan`, { method: 'POST' });
+    toast('tb', '🔍', '掃描已觸發', 'PTT · Dcard · 591…');
+    log('b', '手動掃描已觸發');
+  } catch (e) { toast('tr', '❌', '掃描失敗', e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// GEMINI AI — 核心新功能③
+// ═══════════════════════════════════════════════════════════
+function saveGemini() {
+  const k = document.getElementById('gkey').value.trim();
+  gMdl    = document.getElementById('gmodel').value;
+  if (!k) { toast('tr', '❌', '錯誤', 'API Key 不能為空'); return; }
+  gKey = k; gOK = true;
+  document.getElementById('gcdot').className = 'gcdot on';
+  document.getElementById('gcval').textContent = '已連線';
+  document.getElementById('gm-badge').textContent = gMdl;
+  setSp('ai-sp', 'ai', 'Gemini ✓');
+  log('p', `Gemini 連線（${gMdl}）`);
+  toast('tp', '✦', 'Gemini AI 已啟動', `模型：${gMdl}`);
+}
+
+async function analyzeOne(lead) {
+  if (!gKey) { toast('tr', '⚠️', 'Gemini 未設定', '請先在右側輸入 API Key'); return; }
+
+  // Try via backend first (avoids CORS, key stays server-side)
+  if (wsOK) {
+    try {
+      const r = await fetch(`${BE}/api/leads/${encodeURIComponent(lead.id)}/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ geminiKey: gKey, geminiModel: gMdl }),
+      });
+      if (r.ok) { const d = await r.json(); lead.aiAnalysis = d.aiAnalysis; aiCnt++; document.getElementById('s2').textContent = aiCnt; log('p', `AI 分析完成（後端）`); render(); return; }
+    } catch (_) {}
+  }
+
+  // Fallback: call Gemini directly from browser
+  const mp = MY_PROPS.find(p => {
+    const la = lead.area || '', pa = p.area;
+    return la.includes(pa.replace('區','')) || pa.includes(la.replace('區',''));
+  });
+  const prompt = `你是台灣包租代管業者的AI助理，繁體中文，格式簡潔。
+
+【貼文】${lead.srcName} / ${lead.group}
+${(lead.content || lead.title || '').slice(0, 400)}
+
+【解析】區域 ${lead.area}｜房型 ${lead.type}｜預算 $${lead.budget?.display}/月
+【我的物件】${mp ? `${mp.area} ${mp.type}，$${mp.price.toLocaleString()}/月，${mp.tags.join('、')}` : '無完全符合物件'}
+
+請依序輸出（各2句內）：
+1.【意願評估】高/中/低，理由
+2.【預算分析】合理性與台北市場比較
+3.【物件推薦】是否值得聯繫？理由
+4.【LINE回覆】可直接傳送（≤60字，口語化）`;
+
+  lead.aiLoading = true;
+  render();
+  try {
+    const r = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${gMdl}:generateContent?key=${gKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:.7,maxOutputTokens:600} }) }
+    );
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message || `HTTP ${r.status}`); }
+    const d = await r.json();
+    lead.aiAnalysis = d.candidates?.[0]?.content?.parts?.[0]?.text || '分析失敗';
+    aiCnt++;
+    document.getElementById('s2').textContent = aiCnt;
+    log('p', `AI 分析完成（瀏覽器直連）：<strong>${lead.area} ${lead.type}</strong>`);
+  } catch (e) {
+    lead.aiAnalysis = `分析失敗：${e.message}`;
+    log('r', `Gemini 錯誤：${e.message}`);
+  }
+  lead.aiLoading = false;
+  render();
+}
+
+async function batchAnalyze() {
+  if (!gKey) { toast('tr', '⚠️', 'Gemini 未設定', '請先輸入 API Key'); return; }
+  if (wsOK) {
+    try {
+      const r = await fetch(`${BE}/api/leads/analyze-batch`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ geminiKey: gKey, geminiModel: gMdl, limit: 5, minScore: 75 }),
+      });
+      const d = await r.json();
+      toast('tp', '✦', '批次分析已開始', `分析 ${d.count} 筆高匹配需求`);
+      return;
+    } catch (_) {}
+  }
+  const targets = LEADS.filter(l => l.score >= 75 && !l.aiAnalysis).slice(0, 5);
+  if (!targets.length) { toast('tb', 'ℹ️', '無待分析需求', '高匹配需求都已分析過'); return; }
+  toast('tp', '✦', '批次分析開始', `${targets.length} 筆`);
+  for (const l of targets) { await analyzeOne(l); await new Promise(r => setTimeout(r, 1200)); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// DATA INGEST
+// ═══════════════════════════════════════════════════════════
+function ingest(raw, isNew) {
+  if (LEADS.find(l => l.id === raw.id)) return;
+  const l = { ...raw, isNew, notified: raw.notified || false, aiAnalysis: raw.aiAnalysis || null, aiLoading: false };
+  LEADS.unshift(l);
+  if (LEADS.length > 300) LEADS.pop();
+  if (isNew && l.score >= 80) toast('tg', '📡', '高匹配需求', `${l.srcName} · ${l.area} ${l.type} · ${l.score}%`);
+  if (isNew) log(l.score >= 80 ? 'g' : 'b', `<span class="tag real" style="font-size:8px">真實</span> <strong>${l.area} ${l.type}</strong> @ ${l.srcName}`);
+  stats(); badges(); render();
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENDER LEADS
+// ═══════════════════════════════════════════════════════════
+function render() {
+  let f = [...LEADS];
+  // view filter
+  if (view === 'hot') f = f.filter(l => l.score >= 80);
+  if (view === 'new') f = f.filter(l => l.isNew);
+  if (view === 'ai')  f = f.filter(l => l.aiAnalysis);
+  // source filter
+  if (src !== 'all') f = f.filter(l => l.src === src);
+  // advanced filters ②
+  const fA = document.getElementById('fa')?.value;
+  const fT = document.getElementById('ft')?.value;
+  const fMin = +document.getElementById('fmin')?.value || 0;
+  const fMax = +document.getElementById('fmax')?.value || Infinity;
+  const fSc  = +document.getElementById('fsc')?.value  || 0;
+  if (fA)  f = f.filter(l => (l.area||'').includes(fA.replace('區','')));
+  if (fT)  f = f.filter(l => (l.type||'').includes(fT.replace('房','')));
+  if (fMin) f = f.filter(l => (l.budget?.max||999999) >= fMin);
+  if (fMax < Infinity) f = f.filter(l => (l.budget?.min||0) <= fMax);
+  if (fSc)  f = f.filter(l => l.score >= fSc);
+  if (document.getElementById('t1')?.checked) f = f.filter(l => l.score >= 80);
+  if (document.getElementById('t2')?.checked) f = f.filter(l => l.aiAnalysis);
+  if (document.getElementById('t3')?.checked) f = f.filter(l => !l.notified);
+
+  document.getElementById('fcnt').textContent = f.length;
+  const el = document.getElementById('llist');
+  if (!f.length) {
+    el.innerHTML = `<div class="empty"><div class="eico">${wsOK?'🔍':'📡'}</div><div class="emsg">${wsOK?'沒有符合條件的需求<br>雷達持續掃描中…':'請設定並連線後端伺服器<br>取得 PTT、Dcard、591 真實數據'}</div></div>`;
+    return;
+  }
+  el.innerHTML = f.map(card).join('');
+}
+
+// ① 來源連結直跳
+function card(l) {
+  const sc  = l.score >= 80 ? 'hi' : l.score >= 60 ? 'md' : 'lo';
+  const scC = l.score >= 80 ? 'var(--grn)' : l.score >= 60 ? 'var(--amb)' : 'var(--dim)';
+  const R   = 10, C = +(2*Math.PI*R).toFixed(1), D = +(l.score/100*C).toFixed(1);
+  const mp  = MY_PROPS.find(p => {
+    const la = l.area||'', pa = p.area;
+    return la.includes(pa.replace('區','')) || pa.includes(la.replace('區',''));
+  });
+  const ico  = {ptt:'💬',dcard:'🃏','591':'🏠',fb:'📘'}[l.src]||'📡';
+  const icls = {ptt:'ico-p',dcard:'ico-d','591':'ico-5',fb:'ico-a'}[l.src]||'ico-a';
+  const tm   = l.fetchedAt ? relT(l.fetchedAt) : '剛剛';
+  const bud  = l.budget?.display || '未標示';
+
+  // AI block
+  let aiB = '';
+  if (l.aiLoading) {
+    aiB = `<div class="aibox"><div class="aihdr"><div class="aisp"></div>Gemini 分析中…</div></div>`;
+  } else if (l.aiAnalysis) {
+    const safe = l.aiAnalysis.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    aiB = `<div class="aibox">
+      <div class="aihdr">✦ Gemini AI 分析結果</div>
+      <div class="aitxt">${safe}</div>
+      <div class="airow">
+        <button class="aibtn-sm" onclick="copyLine('${l.id}')">📋 複製 LINE 回覆</button>
+        <button class="aibtn-sm" onclick="reAI('${l.id}')">↺ 重新分析</button>
+      </div>
+    </div>`;
+  }
+
+  // ① Source link
+  const srcL = l.url
+    ? `<a class="srclink" href="${encodeURI(l.url)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">
+        <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2 10L10 2M10 2H5M10 2V7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        前往原始貼文
+      </a>`
+    : '';
+
+  return `<div class="lc ${l.score>=80?'hot':''} ${l.aiAnalysis?'ai-done':''} ${l.isNew?'fresh':''}" id="lc-${l.id}">
+    <div class="ctop">
+      <div class="ico ${icls}">${ico}</div>
+      <div class="cbody">
+        <div class="cmeta">
+          <span class="csrc">${l.srcName}</span>
+          <span style="color:var(--dim)">·</span>
+          <span class="cgrp">${l.group||''}</span>
+          <span style="color:var(--dim)">·</span>
+          <span class="ctm">${tm}</span>
+          ${l.isNew?'<span class="tag new">NEW</span>':''}
+          <span class="tag real">真實</span>
+          ${l.aiAnalysis?'<span class="tag aiok">✦ AI</span>':''}
+          <div class="cscore">
+            <span class="snum ${sc}">${l.score}%</span>
+            <div class="sring">
+              <svg width="24" height="24" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="${R}" fill="none" stroke="var(--b3)" stroke-width="2.5"/>
+                <circle cx="12" cy="12" r="${R}" fill="none" stroke="${scC}" stroke-width="2.5"
+                  stroke-dasharray="${D} ${C}" stroke-linecap="round"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="ctxt">
+          <strong>${l.author||'使用者'}</strong>：
+          <span class="h">${l.area||'未標示'}</span>・<span class="h">${l.type||'不限'}</span>，
+          預算 <span class="h">$${bud}</span>/月
+          ${l.content?`<span class="ex">${l.content.slice(0,130).replace(/\n/g,' ')}…</span>`:''}
+        </div>
+        <div class="chips">
+          <span class="chip">📍 ${l.area||'未標示'}</span>
+          <span class="chip">🛏 ${l.type||'不限'}</span>
+          <span class="chip">💰 $${bud}</span>
+          ${mp?'<span class="chip m">✓ 符合您物件</span>':''}
+          ${l.aiAnalysis?'<span class="chip ai">✦ AI完成</span>':''}
+          ${srcL}
+        </div>
+      </div>
+    </div>
+    ${aiB}
+    <div class="cbot">
+      <button class="nbtn ${l.notified?'done':''}" onclick="doNotify('${l.id}',event)">
+        ${l.notified?'✓ 已推播':'📲 推播通知給我'}
+      </button>
+      <button class="aibtn" onclick="analyzeOne(LEADS.find(x=>x.id==='${l.id}'))"
+        ${!gKey?'disabled title="請先設定 Gemini Key"':''}>
+        ${l.aiAnalysis?'↺ 重析':'✦ AI'}
+      </button>
+      <button class="skbtn" onclick="skipLead('${l.id}',event)">略過</button>
+    </div>
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// ACTIONS
+// ═══════════════════════════════════════════════════════════
+function doNotify(id, e) {
+  e.stopPropagation();
+  const l = LEADS.find(x => x.id === id);
+  if (!l || l.notified) return;
+  l.notified = true; nCnt++;
+  document.getElementById('s3').textContent = nCnt;
+  toast('tg', '🔔', '推播成功', `${l.area} ${l.type} · 匹配 ${l.score}%`);
+  log('g', `推播：<strong>${l.area} ${l.type}</strong>（${l.srcName}）`);
+  if (wsOK) fetch(`${BE}/api/leads/${encodeURIComponent(id)}/notify`, { method:'POST' }).catch(()=>{});
+  render();
+}
+
+function skipLead(id, e) {
+  e.stopPropagation();
+  const i = LEADS.findIndex(x => x.id === id);
+  if (i > -1) LEADS.splice(i, 1);
+  badges(); render();
+}
+
+function setSrc(s, el) {
+  src = s;
+  document.querySelectorAll('.ch').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+  render();
+}
+
+function setView(m, btn) {
+  view = m;
+  document.querySelectorAll('.vb').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  render();
+}
+
+function applyF() { render(); }
+
+function reAI(id) {
+  const l = LEADS.find(x => x.id === id);
+  if (l) { l.aiAnalysis = null; analyzeOne(l); }
+}
+
+function copyLine(id) {
+  const l = LEADS.find(x => x.id === id);
+  if (!l?.aiAnalysis) return;
+  const m = l.aiAnalysis.match(/【LINE回覆】[^\n]*\n?([^【\n]+)/);
+  const t = m ? m[1].trim() : l.aiAnalysis.slice(0, 200);
+  navigator.clipboard.writeText(t).then(() => { log('p', 'LINE 回覆已複製'); toast('tp','📋','已複製','LINE 訊息已複製到剪貼板'); });
+}
+
+// ═══════════════════════════════════════════════════════════
+// STATS + BADGES
+// ═══════════════════════════════════════════════════════════
+function stats() {
+  document.getElementById('s0').textContent = LEADS.length;
+  document.getElementById('s1').textContent = LEADS.filter(l => l.score >= 80).length;
+  document.getElementById('s4').textContent = new Set(LEADS.map(l => l.src)).size;
+}
+
+function badges() {
+  const c = { all: LEADS.length, ptt: 0, dcard: 0, '591': 0, fb: 0 };
+  LEADS.forEach(l => { if (c[l.src] !== undefined) c[l.src]++; });
+  Object.entries(c).forEach(([s, n]) => { const el = document.getElementById(`b-${s}`); if (el) el.textContent = n; });
+  document.getElementById('scnt').textContent = LEADS.length + ' 筆';
+}
+
+// ═══════════════════════════════════════════════════════════
+// RADAR TOGGLE
+// ═══════════════════════════════════════════════════════════
+function toggleRadar() {
+  radar = !radar;
+  document.getElementById('rd-sp').className  = `sp ${radar ? 'live' : 'dead'}`;
+  document.getElementById('rd-lb').textContent = radar ? '運行中' : '已暫停';
+  document.getElementById('stop-btn').textContent = radar ? '暫停' : '啟動';
+  log(radar ? 'g' : 'a', radar ? '雷達重新啟動' : '雷達已暫停');
+}
+
+// ═══════════════════════════════════════════════════════════
+// KEYWORDS
+// ═══════════════════════════════════════════════════════════
+let KWS = [{t:'找房 台北',c:0,g:'g'},{t:'求租 信義',c:0,g:'g'},{t:'想租 大安',c:0,g:'a'},{t:'找租 套房',c:0,g:'g'}];
+function renderKw() {
+  document.getElementById('kwl').innerHTML = KWS.map((k,i) =>
+    `<div class="kwi"><div class="kwd ${k.g}"></div><span class="kwt">${k.t}</span><span class="kwc">${k.c}</span><button class="kwrm" onclick="KWS.splice(${i},1);renderKw()">×</button></div>`
+  ).join('');
+}
+function addKw() {
+  const v = document.getElementById('kwip').value.trim();
+  if (!v) return;
+  KWS.push({ t: v, c: 0, g: 'a' });
+  document.getElementById('kwip').value = '';
+  renderKw();
+  log('b', `新增關鍵字：<strong>${v}</strong>`);
+}
+
+// ═══════════════════════════════════════════════════════════
+// MY PROPS
+// ═══════════════════════════════════════════════════════════
+function renderMPW() {
+  document.getElementById('mpw').innerHTML = MY_PROPS.map(p =>
+    `<div class="mpc">
+      <div class="mps g">● 待租中</div>
+      <div class="mpn">${p.area} ${p.type}</div>
+      <div class="mpp">$${p.price.toLocaleString()}/月 · ${p.tags.join('、')}</div>
+    </div>`
+  ).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════
+function testNotif() {
+  if (!('Notification' in window)) return;
+  Notification.requestPermission().then(p => {
+    if (p === 'granted') {
+      new Notification('租客雷達 🏠', { body: '真實租客需求即時通知已啟用！' });
+      log('g', '瀏覽器通知已啟用');
+    } else { log('a', '通知權限被拒絕'); }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// UI HELPERS
+// ═══════════════════════════════════════════════════════════
+function setSp(id, cls, txt) {
+  const el = document.getElementById(id);
+  el.className = `sp ${cls}`;
+  el.querySelector('span').textContent = txt;
+}
+
+function setBadge(id, cls, txt) {
+  const el = document.getElementById(id);
+  el.className = `rbadge ${cls}`;
+  el.textContent = txt;
+}
+
+function toast(cls, ico, ttl, dsc) {
+  const c = document.getElementById('toasts');
+  const t = document.createElement('div');
+  t.className = `toast ${cls}`;
+  t.innerHTML = `<div class="tico">${ico}</div><div class="tbod"><div class="ttl">${ttl}</div><div class="tdsc">${dsc}</div></div>`;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), 6000);
+}
+
+const LOGS = [];
+function log(c, m) {
+  const n = new Date();
+  const t = n.getHours().toString().padStart(2,'0') + ':' + n.getMinutes().toString().padStart(2,'0');
+  LOGS.unshift({ c, m, t });
+  if (LOGS.length > 25) LOGS.pop();
+  document.getElementById('logwrap').innerHTML = LOGS.map(l =>
+    `<div class="logi"><span class="logt">${l.t}</span><div class="logd ${l.c}"></div><span class="logm">${l.m}</span></div>`
+  ).join('');
+}
+
+function relT(iso) {
+  const m = Math.floor((Date.now() - new Date(iso)) / 60000);
+  if (m < 1) return '剛剛';
+  if (m < 60) return `${m}m前`;
+  if (m < 1440) return `${Math.floor(m/60)}h前`;
+  return `${Math.floor(m/1440)}d前`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// FB 社團管理
+// ═══════════════════════════════════════════════════════════
+let groupsCache = [];  // 從後端載入的社團清單
+
+async function loadGroups() {
+  if (!wsOK) return;
+  try {
+    const r = await fetch(`${BE}/api/groups`);
+    if (!r.ok) return;
+    const d = await r.json();
+    groupsCache = d.groups || [];
+    renderGroups();
+    document.getElementById('grp-badge').textContent = `${d.total} 個`;
+  } catch (_) {}
+}
+
+function renderGroups() {
+  const el = document.getElementById('grp-list');
+  if (!groupsCache.length) {
+    el.innerHTML = `<div style="font-size:10px;color:var(--dim);padding:4px 8px">連線後端後可查看社團清單</div>`;
+    return;
+  }
+  el.innerHTML = groupsCache.map(g => {
+    // 從 URL 取社團 ID 作為顯示名稱
+    const gid   = g.id || g.url.match(/groups\/(\d+)/)?.[1] || '未知';
+    const label = `社團 ${gid}`;
+    const isCustom = g.source === 'custom';
+    return `<div class="grp-item">
+      <span class="grp-ico">📘</span>
+      <span class="grp-name" title="${g.url}">${label}</span>
+      <span class="grp-src ${g.source}">${isCustom ? '自訂' : '內建'}</span>
+      <button class="grp-del" onclick="deleteGroup('${gid}', this)"
+        ${!isCustom ? 'disabled title="內建社團無法刪除"' : ''}>×</button>
+    </div>`;
+  }).join('');
+}
+
+async function addGroup() {
+  const inp = document.getElementById('grp-inp');
+  const url = inp.value.trim();
+  if (!url) { toast('tr', '❌', '請輸入社團網址', '格式：facebook.com/groups/數字'); return; }
+  if (!url.includes('facebook.com/groups/')) {
+    toast('tr', '❌', '網址格式錯誤', '請貼上完整的 Facebook 社團網址');
+    return;
+  }
+  if (!wsOK) { toast('tr', '❌', '後端未連線', '請先連線後端才能新增社團'); return; }
+
+  try {
+    const r = await fetch(`${BE}/api/groups`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const d = await r.json();
+    if (!r.ok) { toast('tr', '❌', '新增失敗', d.error || '未知錯誤'); return; }
+    inp.value = '';
+    toast('tg', '✅', '社團已新增', `目前共 ${d.total} 個社團`);
+    log('g', `新增 Facebook 社團：<strong>${url}</strong>`);
+    await loadGroups();
+  } catch (e) {
+    toast('tr', '❌', '新增失敗', e.message);
+  }
+}
+
+async function deleteGroup(gid, btn) {
+  if (!wsOK) { toast('tr', '❌', '後端未連線', ''); return; }
+  btn.disabled = true;
+  try {
+    const r = await fetch(`${BE}/api/groups/${gid}`, { method: 'DELETE' });
+    const d = await r.json();
+    if (!r.ok) { toast('tr', '❌', '刪除失敗', d.error || ''); btn.disabled = false; return; }
+    toast('tg', '🗑', '社團已刪除', `剩餘 ${d.total} 個社團`);
+    log('a', `刪除自訂社團 ID：${gid}`);
+    await loadGroups();
+  } catch (e) {
+    toast('tr', '❌', '刪除失敗', e.message);
+    btn.disabled = false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// CLOCK + SCAN SRC ROTATION
+// ═══════════════════════════════════════════════════════════
+function tick() {
+  document.getElementById('clk').textContent = new Date().toLocaleTimeString('zh-TW', { hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false });
+}
+setInterval(tick, 1000); tick();
+setInterval(() => {
+  if (radar && wsOK) document.getElementById('ssrc').textContent = SRCS[sIdx++ % SRCS.length];
+}, 3200);
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+renderKw();
+renderMPW();
+render();
+
+log('g', '租客雷達 v4 啟動');
+log('b', '爬取來源：PTT rent、PTT Rent_tpe、Dcard、591 求租板');
+log('a', 'Gemini AI：設定 Key 後高匹配需求將自動分析');
+
+// auto-detect local backend
+(async () => {
+  try {
+    const r = await fetch('http://localhost:3001/health', { signal: AbortSignal.timeout(2500) });
+    if (r.ok) { log('g', '偵測到本機後端，自動連線…'); connectBackend(); }
+    else        log('a', '本機後端回應異常，請手動設定');
+  } catch (_) { log('a', '本機後端未偵測到，請在右側手動設定連線'); }
+})();
+</script>
+</body>
+</html>

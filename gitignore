@@ -1,0 +1,21 @@
+# ════════════════════════════════════════
+# 絕對不能上傳到 GitHub 的檔案
+# ════════════════════════════════════════
+
+# 環境變數（含 API Key，絕對保密）
+.env
+.env.local
+.env.production
+
+# Node.js 依賴（太大，會自動安裝）
+node_modules/
+
+# 系統暫存檔
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+
+# 編輯器設定
+.vscode/
+.idea/
