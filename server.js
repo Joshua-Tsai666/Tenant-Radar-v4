@@ -124,7 +124,13 @@ async function resilientGet(url, options = {}) {
 // ══════════════════════════════════════════════════════════
 async function crawlGoogleNews() {
   const out = [];
-  const queries = ['台北 求租', '台北 找房', '新北 求租', '台北 想租', '租屋 找房客'];
+  const queries = [
+    '台北 求租', '台北 找房', '新北 求租', '台北 想租', '租屋 找房客',
+    '信義區 租屋', '大安區 租屋', '內湖 找房', '中山區 租屋', '南港 找房',
+    '台北市 求租 2房', '台北 套房 求租', '雙北 找房', '板橋 求租',
+    '台北 找租', '新北市 租屋', '台北 租房子', '永和 求租',
+    'PTT 台北 求租', 'Dcard 台北 找房',
+  ];
 
   for (const q of queries) {
     try {
@@ -632,6 +638,42 @@ app.get('/api/leads', (req, res) => {
   if (q.limit)     list = list.slice(0, +q.limit);
 
   res.json({ count: list.length, leads: list });
+});
+
+// POST /api/leads/bulk — 本機爬蟲批次推送
+app.post('/api/leads/bulk', (req, res) => {
+  const { leads = [], source = 'unknown' } = req.body;
+  if (!Array.isArray(leads) || !leads.length)
+    return res.status(400).json({ error: 'leads 陣列不能為空' });
+
+  let added = 0;
+  for (const raw of leads) {
+    if (!raw.id || leadsDB.has(raw.id)) continue;
+    const lead = {
+      ...raw,
+      seq:        ++seq,
+      score:      calcScore(raw),
+      isNew:      true,
+      notified:   false,
+      aiAnalysis: null,
+      fetchedAt:  new Date().toISOString(),
+      pushedFrom: source,
+    };
+    leadsDB.set(raw.id, lead);
+    added++;
+    broadcast({ type: 'new_lead', lead });
+
+    if (lead.score >= 80 && process.env.GEMINI_API_KEY) {
+      setTimeout(async () => {
+        lead.aiAnalysis = await geminiAnalyze(lead);
+        if (lead.aiAnalysis)
+          broadcast({ type: 'ai_update', id: lead.id, aiAnalysis: lead.aiAnalysis });
+      }, 2000 + Math.random() * 3000);
+    }
+  }
+
+  console.log(`📥 bulk 推送：${source} 新增 ${added}/${leads.length} 筆`);
+  res.json({ ok: true, added, total: leadsDB.size, message: `成功新增 ${added} 筆` });
 });
 
 // POST /api/scan
