@@ -120,133 +120,212 @@ async function resilientGet(url, options = {}) {
 }
 
 // ══════════════════════════════════════════════════════════
-//  CRAWLER A — PTT（用 pttweb.cc 境外鏡像 API）
+//  CRAWLER A — Google 新聞 RSS（Railway 可穩定存取 ✅）
+// ══════════════════════════════════════════════════════════
+async function crawlGoogleNews() {
+  const out = [];
+  const queries = ['台北 求租', '台北 找房', '新北 求租', '台北 想租', '租屋 找房客'];
+
+  for (const q of queries) {
+    try {
+      const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant`;
+      const res = await resilientGet(url, { headers: { 'Accept': 'application/xml, text/xml' } });
+      const $   = cheerio.load(res.data, { xmlMode: true });
+
+      $('item').each((_, el) => {
+        const title  = $(el).find('title').first().text().trim();
+        const link   = $(el).find('link').first().text().trim();
+        const desc   = $(el).find('description').first().text().replace(/<[^>]+>/g, '').trim();
+        const date   = $(el).find('pubDate').first().text().trim();
+        const source = $(el).find('source').first().text().trim() || 'Google 新聞';
+        const pid    = Buffer.from(link).toString('base64').slice(0, 24);
+        const id     = `gnews_${pid}`;
+
+        if (out.find(x => x.id === id)) return;
+        const raw = `${title} ${desc}`;
+        out.push({
+          id, src: 'gnews', srcName: 'Google 新聞', group: source,
+          title, content: desc.slice(0, 400),
+          author: source, date, url: link,
+          area: parseArea(raw), type: parseType(raw), budget: parseBudget(raw),
+        });
+      });
+      await sleep(300);
+    } catch (e) { console.warn(`Google News「${q}」失敗: ${e.message}`); }
+  }
+
+  console.log(`Google News: 找到 ${out.length} 筆`);
+  return out;
+}
+
+// ══════════════════════════════════════════════════════════
+//  CRAWLER B — PTT（支援 Cookie 登入，繞過 IP 封鎖）
+//  設定環境變數 COOKIE_PTT 即可登入爬取
+//  取得方式：登入 ptt.cc → F12 → Application → Cookies
 // ══════════════════════════════════════════════════════════
 async function crawlPTT(board) {
   const out = [];
+
+  // 合併登入 Cookie + over18
+  const cookiePTT = process.env.COOKIE_PTT
+    ? `over18=1; ${process.env.COOKIE_PTT}`
+    : 'over18=1';
+
   try {
-    // pttweb.cc 提供 JSON API，海外可存取
-    const res = await resilientGet(
-      `https://pttweb.cc/api/v1/article/list/${board}?p=1&page_size=30`,
-      { headers: { 'Accept': 'application/json', 'Referer': 'https://pttweb.cc/' } }
+    const listRes = await resilientGet(
+      `https://www.ptt.cc/bbs/${board}/index.html`,
+      { headers: { Cookie: cookiePTT } }
     );
 
-    const articles = res.data?.data || res.data?.items || res.data || [];
-    const list = Array.isArray(articles) ? articles : [];
+    const $l    = cheerio.load(listRes.data);
+    const links = [];
 
-    for (const a of list) {
-      const title  = a.title || a.subject || '';
-      const author = a.author || a.owner || '匿名';
-      const date   = a.date || a.published || new Date().toISOString();
-      const aid    = a.aid || a.article_id || a.id || String(Date.now() + Math.random());
-      const url    = a.url || `https://www.ptt.cc/bbs/${board}/${aid}.html`;
-      const content = a.content || a.preview || '';
+    $l('.r-ent').each((_, el) => {
+      const a     = $l(el).find('.title a');
+      const title = a.text().trim();
+      const href  = a.attr('href');
+      if (href && /找|求租|急找|想租|需要|cover|徵租|覓/.test(title))
+        links.push({ href, title });
+    });
 
-      if (!/找|求租|急找|想租|需要|cover|徵租|覓/.test(title)) continue;
+    if (!links.length) {
+      console.log(`PTT ${board}: 無符合文章（HTML長度: ${listRes.data.length}）`);
+      return out;
+    }
 
-      const raw = `${title} ${content}`;
-      out.push({
-        id:      `ptt_${aid}`,
-        src:     'ptt', srcName: `PTT ${board}`, group: board,
-        title, content: content.slice(0, 500),
-        author, date, url,
-        area:   parseArea(raw),
-        type:   parseType(raw),
-        budget: parseBudget(raw),
-      });
+    for (const { href, title } of links.slice(0, 8)) {
+      try {
+        const url = `https://www.ptt.cc${href}`;
+        const pr  = await resilientGet(url, { headers: { Cookie: cookiePTT } });
+        const $p  = cheerio.load(pr.data);
+        const raw = $p('#main-content').text().replace(/--[\s\S]*$/, '').trim();
+        const author  = $p('.article-meta-value').eq(0).text().trim() || '匿名';
+        const dateStr = $p('.article-meta-value').eq(2).text().trim();
+        const postId  = href.match(/M\.(\d+)/)?.[1] || String(Date.now() + Math.random());
+
+        if (!raw) continue;
+        out.push({
+          id:      `ptt_${postId}`,
+          src:     'ptt', srcName: `PTT ${board}`, group: board,
+          title,   content: raw.slice(0, 500),
+          author,  date: dateStr, url,
+          area:    parseArea(raw + ' ' + title),
+          type:    parseType(raw + ' ' + title),
+          budget:  parseBudget(raw),
+        });
+        await sleep(600);
+      } catch (e) { console.warn(`PTT 單篇失敗: ${e.message}`); }
     }
     console.log(`PTT ${board}: 找到 ${out.length} 筆`);
   } catch (e) {
-    console.error(`PTT ${board} 失敗: ${e.message}`);
+    console.log(`PTT ${board} 無法連接: ${e.message}`);
   }
   return out;
 }
 
 // ══════════════════════════════════════════════════════════
-//  CRAWLER B — Dcard 搜尋 API
+//  CRAWLER C — Dcard（備用，目前 Railway IP 被擋）
 // ══════════════════════════════════════════════════════════
 async function crawlDcard() {
   const out = [];
-  const keywords = ['找房', '求租', '想租', '找租'];
-
-  for (const kw of keywords) {
-    try {
-      const res = await resilientGet(
-        `https://www.dcard.tw/_api/search/posts?query=${encodeURIComponent(kw)}&forum=rent&limit=20`,
-        {
-          headers: {
-            'Referer':         'https://www.dcard.tw/search',
-            'Accept':          'application/json',
-            'Accept-Language': 'zh-TW,zh;q=0.9',
-          }
-        }
-      );
-
-      const posts = Array.isArray(res.data) ? res.data
-                  : Array.isArray(res.data?.posts) ? res.data.posts : [];
-
-      for (const p of posts) {
-        const text = `${p.title || ''} ${p.excerpt || ''}`;
-        const id   = `dcard_${p.id}`;
-        if (out.find(x => x.id === id)) continue;
-        out.push({
-          id,
-          src: 'dcard', srcName: 'Dcard 租屋', group: '租屋版',
-          title:   p.title || '',
-          content: (p.excerpt || '').slice(0, 300),
-          author:  p.school || '匿名',
-          date:    p.createdAt || new Date().toISOString(),
-          url:     `https://www.dcard.tw/f/rent/p/${p.id}`,
-          area:    parseArea(text),
-          type:    parseType(text),
-          budget:  parseBudget(text),
-        });
-      }
-      await sleep(500);
-    } catch (e) {
-      console.warn(`Dcard 關鍵字「${kw}」失敗: ${e.message}`);
+  try {
+    const res = await resilientGet(
+      'https://www.dcard.tw/_api/forums/rent/posts?limit=30&popular=false',
+      { headers: { 'Referer': 'https://www.dcard.tw/f/rent', 'Accept': 'application/json' } }
+    );
+    const posts = Array.isArray(res.data) ? res.data : [];
+    for (const p of posts.slice(0, 25)) {
+      const text = `${p.title || ''} ${p.excerpt || ''}`;
+      if (!/找|求租|想租|需要|尋找|覓/.test(text)) continue;
+      out.push({
+        id: `dcard_${p.id}`, src: 'dcard', srcName: 'Dcard 租屋', group: '租屋版',
+        title: p.title || '', content: (p.excerpt || '').slice(0, 300),
+        author: p.school || '匿名', date: p.createdAt || new Date().toISOString(),
+        url: `https://www.dcard.tw/f/rent/p/${p.id}`,
+        area: parseArea(text), type: parseType(text), budget: parseBudget(text),
+      });
     }
-  }
-
-  console.log(`Dcard: 找到 ${out.length} 筆`);
+    console.log(`Dcard: 找到 ${out.length} 筆`);
+  } catch (e) { console.log(`Dcard 無法連接`); }
   return out;
 }
 
 // ══════════════════════════════════════════════════════════
-//  CRAWLER C — 591 求租板 (public HTML)
+//  CRAWLER C — 591 求租板（支援 Cookie 登入）
+//  設定環境變數 COOKIE_591 即可抓到求租板內容
+//  取得方式：登入 591 → F12 → Application → Cookies
 // ══════════════════════════════════════════════════════════
 async function crawl591() {
   const out = [];
+
+  // 優先用登入 Cookie，沒有則嘗試不登入
+  const cookie591 = process.env.COOKIE_591 || '591_new_session=1';
+  const isLoggedIn = !!process.env.COOKIE_591;
+
   try {
     const res = await resilientGet(
       'https://rent.591.com.tw/home.php?func=demand&kind=0&region=1',
-      { headers: { Referer: 'https://rent.591.com.tw/', Cookie: '591_new_session=1' } }
+      {
+        headers: {
+          'Cookie':  cookie591,
+          'Referer': 'https://rent.591.com.tw/',
+          'Accept':  'text/html,application/xhtml+xml,*/*;q=0.8',
+        }
+      }
     );
-    const $ = cheerio.load(res.data);
 
-    // Try multiple possible selectors as 591 may vary layout
-    const rows = $('.demand-list-item, .rList-item').toArray();
+    const html = res.data;
+    const $    = cheerio.load(html);
+
+    // 檢查是否被導向登入頁
+    if (html.includes('歡迎來到591房屋交易登入') || html.includes('login')) {
+      if (!isLoggedIn) {
+        console.log('591: 求租板需要登入，請設定 COOKIE_591 環境變數');
+      } else {
+        console.log('591: Cookie 已過期，請重新取得 COOKIE_591');
+      }
+      return out;
+    }
+
+    // 嘗試多種選擇器抓求租列表
+    const selectors = [
+      '.demand-list-item',
+      '.rList-item',
+      '.house-list-item',
+      'li[data-itemid]',
+      '.item',
+    ];
+
+    let rows = [];
+    for (const sel of selectors) {
+      rows = $(sel).toArray();
+      if (rows.length > 0) break;
+    }
+
+    console.log(`591: 頁面長度 ${html.length}，找到 ${rows.length} 筆列表項目`);
+
     for (const el of rows.slice(0, 20)) {
-      const titleEl = $(el).find('.title, h3').first();
-      const title   = titleEl.text().trim();
+      const title = $(el).find('.title, h3, h2, .name, strong').first().text().trim();
       if (!title) continue;
 
-      const desc  = $(el).find('.desc, .info').first().text().trim();
-      const price = $(el).find('.price, .price-num').first().text().trim();
+      const desc  = $(el).find('.desc, .info, .price-info, p').first().text().trim();
+      const price = $(el).find('.price, .price-num, [class*=price]').first().text().trim();
       const href  = $(el).find('a').first().attr('href') || '';
       const url   = href.startsWith('http') ? href : `https://rent.591.com.tw${href}`;
       const raw   = `${title} ${desc} ${price}`;
 
       out.push({
-        id: `591_${Buffer.from(url).toString('base64').slice(0, 20)}_${Date.now()}`,
-        src: '591', srcName: '591 求租板', group: '591租屋網',
-        title, content: desc.slice(0, 300),
-        author: '591 用戶', date: new Date().toISOString(), url,
-        area:   parseArea(raw),
-        type:   parseType(raw),
-        budget: parseBudget(price + ' ' + raw),
+        id:      `591_${Buffer.from(title + date).toString('base64').slice(0, 20)}`,
+        src:     '591', srcName: '591 求租板', group: '591租屋網',
+        title,   content: desc.slice(0, 300),
+        author:  '591 用戶', date: new Date().toISOString(), url,
+        area:    parseArea(raw),
+        type:    parseType(raw),
+        budget:  parseBudget(price + ' ' + raw),
       });
     }
+
+    console.log(`591: 找到 ${out.length} 筆求租`);
   } catch (e) { console.error(`591: ${e.message}`); }
   return out;
 }
@@ -475,18 +554,19 @@ async function runScan() {
   broadcast({ type: 'scan_start', time: new Date().toISOString() });
 
   try {
-    const [r1, r2, r3, r4, r5] = await Promise.allSettled([
-      crawlPTT('rent'),
-      crawlPTT('Rent_tpe'),
-      crawlDcard(),
-      crawl591(),
-      crawlFacebook(),
+    const [r1, r2, r3, r4, r5, r6] = await Promise.allSettled([
+      crawlGoogleNews(),   // ✅ Google 新聞 RSS（穩定可用）
+      crawlPTT('rent'),    // 備用（目前被擋）
+      crawlPTT('Rent_tpe'),// 備用（目前被擋）
+      crawlDcard(),        // 備用（目前被擋）
+      crawl591(),          // 嘗試中
+      crawlFacebook(),     // 需要 Token
     ]);
 
     const fresh = [
       ...(r1.value || []), ...(r2.value || []),
       ...(r3.value || []), ...(r4.value || []),
-      ...(r5.value || []),
+      ...(r5.value || []), ...(r6.value || []),
     ];
 
     let added = 0;
