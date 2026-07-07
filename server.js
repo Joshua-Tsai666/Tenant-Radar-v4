@@ -157,54 +157,44 @@ async function resilientGet(url, options = {}) {
 const http = axios.create({ timeout: 14000, headers: BASE_HEADERS });
 
 // ══════════════════════════════════════════════════════════
-//  CRAWLER A — PTT RSS Feed（正確網址：rss.ptt.cc）
+//  CRAWLER A — PTT（用 pttweb.cc 境外鏡像 API）
 // ══════════════════════════════════════════════════════════
 async function crawlPTT(board) {
   const out = [];
   try {
-    // PTT RSS 正確網址格式：http://rss.ptt.cc/板名.xml
-    const rssUrl = `http://rss.ptt.cc/${board}.xml`;
-    const res = await resilientGet(rssUrl, {
-      headers: {
-        'Accept': 'application/xml, text/xml, */*',
-        'Cookie': 'over18=1',
-      }
-    });
+    // pttweb.cc 提供 JSON API，海外可存取
+    const res = await resilientGet(
+      `https://pttweb.cc/api/v1/article/list/${board}?p=1&page_size=30`,
+      { headers: { 'Accept': 'application/json', 'Referer': 'https://pttweb.cc/' } }
+    );
 
-    const $ = cheerio.load(res.data, { xmlMode: true });
+    const articles = res.data?.data || res.data?.items || res.data || [];
+    const list = Array.isArray(articles) ? articles : [];
 
-    // RSS 2.0 格式（item 標籤）
-    $('item').each((_, el) => {
-      const title  = $(el).find('title').first().text().trim();
-      const link   = $(el).find('link').first().text().trim()
-                  || $(el).find('link').attr('href') || '';
-      const desc   = $(el).find('description').first().text().trim();
-      const author = $(el).find('author').first().text().trim() || '匿名';
-      const date   = $(el).find('pubDate').first().text().trim();
-      const postId = link.match(/M\.(\d+)/)?.[1] || String(Date.now() + Math.random());
+    for (const a of list) {
+      const title  = a.title || a.subject || '';
+      const author = a.author || a.owner || '匿名';
+      const date   = a.date || a.published || new Date().toISOString();
+      const aid    = a.aid || a.article_id || a.id || String(Date.now() + Math.random());
+      const url    = a.url || `https://www.ptt.cc/bbs/${board}/${aid}.html`;
+      const content = a.content || a.preview || '';
 
-      if (!/找|求租|急找|想租|需要|cover|徵租|覓/.test(title)) return;
+      if (!/找|求租|急找|想租|需要|cover|徵租|覓/.test(title)) continue;
 
-      const raw = `${title} ${desc}`;
+      const raw = `${title} ${content}`;
       out.push({
-        id:      `ptt_${postId}`,
-        src:     'ptt',
-        srcName: `PTT ${board}`,
-        group:   board,
-        title,
-        content: desc.slice(0, 500),
-        author,
-        date,
-        url:     link || `https://www.ptt.cc/bbs/${board}/`,
-        area:    parseArea(raw),
-        type:    parseType(raw),
-        budget:  parseBudget(raw),
+        id:      `ptt_${aid}`,
+        src:     'ptt', srcName: `PTT ${board}`, group: board,
+        title, content: content.slice(0, 500),
+        author, date, url,
+        area:   parseArea(raw),
+        type:   parseType(raw),
+        budget: parseBudget(raw),
       });
-    });
-
-    console.log(`PTT ${board} RSS: 找到 ${out.length} 筆求租文章`);
+    }
+    console.log(`PTT ${board}: 找到 ${out.length} 筆`);
   } catch (e) {
-    console.error(`PTT ${board} RSS 失敗: ${e.message}`);
+    console.error(`PTT ${board} 失敗: ${e.message}`);
   }
   return out;
 }
