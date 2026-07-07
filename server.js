@@ -157,128 +157,97 @@ async function resilientGet(url, options = {}) {
 const http = axios.create({ timeout: 14000, headers: BASE_HEADERS });
 
 // ══════════════════════════════════════════════════════════
-//  CRAWLER A — PTT (使用官方 JSON API，不依賴 HTML 解析)
-//  https://pttnewsapi.docs.apiary.io/
+//  CRAWLER A — PTT RSS Feed（最穩定，不會被擋）
+//  PTT 官方提供 Atom RSS，任何地區都可以讀取
 // ══════════════════════════════════════════════════════════
 async function crawlPTT(board) {
   const out = [];
   try {
-    // PTT 有提供非官方但穩定的 JSON API
-    const apiUrl = `https://www.pttweb.cc/bbs/${board}/`;
-    const res = await resilientGet(apiUrl, {
+    // 使用 PTT 官方 Atom RSS
+    const rssUrl = `https://www.ptt.cc/atom/${board}.xml`;
+    const res = await resilientGet(rssUrl, {
       headers: {
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.pttweb.cc/',
+        'Accept': 'application/xml, text/xml, */*',
         'Cookie': 'over18=1',
       }
     });
 
-    // 嘗試從 HTML 抽取文章列表（pttweb.cc 格式）
-    const $ = cheerio.load(res.data);
-    const links = [];
+    const $ = cheerio.load(res.data, { xmlMode: true });
 
-    // pttweb.cc 的文章列表選擇器
-    $('a.item').each((_, el) => {
-      const title = $(el).find('.title').text().trim() || $(el).attr('title') || '';
-      const href  = $(el).attr('href') || '';
-      if (href && /找|求租|急找|想租|需要|cover|徵租|覓/.test(title))
-        links.push({ href: `https://www.pttweb.cc${href}`, title });
+    $('entry').each((_, el) => {
+      const title   = $(el).find('title').first().text().trim();
+      const link    = $(el).find('link').attr('href') || '';
+      const content = $(el).find('content, summary').first().text().trim();
+      const author  = $(el).find('author name').first().text().trim() || '匿名';
+      const date    = $(el).find('published, updated').first().text().trim();
+      const postId  = link.match(/M\.(\d+)/)?.[1] || String(Date.now() + Math.random());
+
+      // 只要求租類文章
+      if (!/找|求租|急找|想租|需要|cover|徵租|覓/.test(title)) return;
+
+      const raw = `${title} ${content}`;
+      out.push({
+        id: `ptt_${postId}`,
+        src: 'ptt', srcName: `PTT ${board}`, group: board,
+        title, content: content.slice(0, 500),
+        author, date, url: link,
+        area:   parseArea(raw),
+        type:   parseType(raw),
+        budget: parseBudget(raw),
+      });
     });
 
-    // 如果 pttweb.cc 沒抓到，改用 ptt.cx 鏡像站
-    if (!links.length) {
-      const mirrorRes = await resilientGet(
-        `https://ptt.cx/bbs/${board}/index.html`,
-        { headers: { Cookie: 'over18=1' } }
-      );
-      const $m = cheerio.load(mirrorRes.data);
-      $m('.r-ent').each((_, el) => {
-        const a     = $m(el).find('.title a');
-        const title = a.text().trim();
-        const href  = a.attr('href');
-        if (href && /找|求租|急找|想租|需要|cover|徵租|覓/.test(title))
-          links.push({ href: `https://ptt.cx${href}`, title });
-      });
-    }
-
-    for (const { href, title } of links.slice(0, 8)) {
-      try {
-        const pr  = await resilientGet(href, { headers: { Cookie: 'over18=1' } });
-        const $p  = cheerio.load(pr.data);
-        const raw = $p('#main-content').text().replace(/--[\s\S]*$/, '').trim()
-                    || $p('.content').text().trim();
-        const author  = $p('.article-meta-value').eq(0).text().trim() || '匿名';
-        const dateStr = $p('.article-meta-value').eq(2).text().trim() || new Date().toISOString();
-        const postId  = href.match(/M\.(\d+)/)?.[1] || String(Date.now() + Math.random());
-
-        if (!raw) continue;
-        out.push({
-          id: `ptt_${postId}`,
-          src: 'ptt', srcName: `PTT ${board}`, group: board,
-          title, content: raw.slice(0, 500),
-          author, date: dateStr, url: href,
-          area:   parseArea(raw + ' ' + title),
-          type:   parseType(raw + ' ' + title),
-          budget: parseBudget(raw),
-        });
-        await sleep(800);
-      } catch (e) { console.warn(`PTT post fail: ${e.message}`); }
-    }
-    console.log(`PTT ${board}: 找到 ${out.length} 筆`);
-  } catch (e) { console.error(`PTT ${board}: ${e.message}`); }
+    console.log(`PTT ${board} RSS: 找到 ${out.length} 筆求租文章`);
+  } catch (e) {
+    console.error(`PTT ${board} RSS 失敗: ${e.message}`);
+  }
   return out;
 }
 
 // ══════════════════════════════════════════════════════════
-//  CRAWLER B — Dcard（多重 API 端點備援）
+//  CRAWLER B — Dcard 搜尋 API
 // ══════════════════════════════════════════════════════════
 async function crawlDcard() {
   const out = [];
+  const keywords = ['找房', '求租', '想租', '找租'];
 
-  // 嘗試多個 Dcard API 端點
-  const endpoints = [
-    'https://www.dcard.tw/_api/forums/rent/posts?limit=30&popular=false',
-    'https://www.dcard.tw/_api/forums/rent/posts?limit=20',
-    'https://www.dcard.tw/_api/search/posts?query=找房&forum=rent&limit=20',
-  ];
-
-  for (const endpoint of endpoints) {
+  for (const kw of keywords) {
     try {
-      const res = await resilientGet(endpoint, {
-        headers: {
-          'Referer':          'https://www.dcard.tw/f/rent',
-          'Origin':           'https://www.dcard.tw',
-          'Accept':           'application/json',
-          'Accept-Language':  'zh-TW,zh;q=0.9',
-          'sec-fetch-dest':   'empty',
-          'sec-fetch-mode':   'cors',
-          'sec-fetch-site':   'same-origin',
+      const res = await resilientGet(
+        `https://www.dcard.tw/_api/search/posts?query=${encodeURIComponent(kw)}&forum=rent&limit=20`,
+        {
+          headers: {
+            'Referer':         'https://www.dcard.tw/search',
+            'Accept':          'application/json',
+            'Accept-Language': 'zh-TW,zh;q=0.9',
+          }
         }
-      });
+      );
 
       const posts = Array.isArray(res.data) ? res.data
                   : Array.isArray(res.data?.posts) ? res.data.posts : [];
 
-      if (!posts.length) continue;
-
-      for (const p of posts.slice(0, 25)) {
-        const text = `${p.title || ''} ${p.excerpt || p.content || ''}`;
-        if (!/找|求租|想租|需要|尋找|looking|覓/.test(text)) continue;
-        const id = `dcard_${p.id}`;
+      for (const p of posts) {
+        const text = `${p.title || ''} ${p.excerpt || ''}`;
+        const id   = `dcard_${p.id}`;
         if (out.find(x => x.id === id)) continue;
         out.push({
           id,
           src: 'dcard', srcName: 'Dcard 租屋', group: '租屋版',
-          title: p.title || '', content: (p.excerpt || '').slice(0, 300),
-          author: p.school || '匿名', date: p.createdAt || new Date().toISOString(),
-          url: `https://www.dcard.tw/f/rent/p/${p.id}`,
-          area:   parseArea(text),
-          type:   parseType(text),
-          budget: parseBudget(text),
+          title:   p.title || '',
+          content: (p.excerpt || '').slice(0, 300),
+          author:  p.school || '匿名',
+          date:    p.createdAt || new Date().toISOString(),
+          url:     `https://www.dcard.tw/f/rent/p/${p.id}`,
+          area:    parseArea(text),
+          type:    parseType(text),
+          budget:  parseBudget(text),
         });
       }
-      if (out.length) break; // 有結果就停止嘗試
-    } catch (e) { console.warn(`Dcard endpoint ${endpoint}: ${e.message}`); }
+      await sleep(500);
+    } catch (e) {
+      console.warn(`Dcard 關鍵字「${kw}」失敗: ${e.message}`);
+    }
   }
 
   console.log(`Dcard: 找到 ${out.length} 筆`);
