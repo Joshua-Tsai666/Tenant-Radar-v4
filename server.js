@@ -157,14 +157,13 @@ async function resilientGet(url, options = {}) {
 const http = axios.create({ timeout: 14000, headers: BASE_HEADERS });
 
 // ══════════════════════════════════════════════════════════
-//  CRAWLER A — PTT RSS Feed（最穩定，不會被擋）
-//  PTT 官方提供 Atom RSS，任何地區都可以讀取
+//  CRAWLER A — PTT RSS Feed（正確網址：rss.ptt.cc）
 // ══════════════════════════════════════════════════════════
 async function crawlPTT(board) {
   const out = [];
   try {
-    // 使用 PTT 官方 Atom RSS
-    const rssUrl = `https://www.ptt.cc/atom/${board}.xml`;
+    // PTT RSS 正確網址格式：http://rss.ptt.cc/板名.xml
+    const rssUrl = `http://rss.ptt.cc/${board}.xml`;
     const res = await resilientGet(rssUrl, {
       headers: {
         'Accept': 'application/xml, text/xml, */*',
@@ -174,26 +173,32 @@ async function crawlPTT(board) {
 
     const $ = cheerio.load(res.data, { xmlMode: true });
 
-    $('entry').each((_, el) => {
-      const title   = $(el).find('title').first().text().trim();
-      const link    = $(el).find('link').attr('href') || '';
-      const content = $(el).find('content, summary').first().text().trim();
-      const author  = $(el).find('author name').first().text().trim() || '匿名';
-      const date    = $(el).find('published, updated').first().text().trim();
-      const postId  = link.match(/M\.(\d+)/)?.[1] || String(Date.now() + Math.random());
+    // RSS 2.0 格式（item 標籤）
+    $('item').each((_, el) => {
+      const title  = $(el).find('title').first().text().trim();
+      const link   = $(el).find('link').first().text().trim()
+                  || $(el).find('link').attr('href') || '';
+      const desc   = $(el).find('description').first().text().trim();
+      const author = $(el).find('author').first().text().trim() || '匿名';
+      const date   = $(el).find('pubDate').first().text().trim();
+      const postId = link.match(/M\.(\d+)/)?.[1] || String(Date.now() + Math.random());
 
-      // 只要求租類文章
       if (!/找|求租|急找|想租|需要|cover|徵租|覓/.test(title)) return;
 
-      const raw = `${title} ${content}`;
+      const raw = `${title} ${desc}`;
       out.push({
-        id: `ptt_${postId}`,
-        src: 'ptt', srcName: `PTT ${board}`, group: board,
-        title, content: content.slice(0, 500),
-        author, date, url: link,
-        area:   parseArea(raw),
-        type:   parseType(raw),
-        budget: parseBudget(raw),
+        id:      `ptt_${postId}`,
+        src:     'ptt',
+        srcName: `PTT ${board}`,
+        group:   board,
+        title,
+        content: desc.slice(0, 500),
+        author,
+        date,
+        url:     link || `https://www.ptt.cc/bbs/${board}/`,
+        area:    parseArea(raw),
+        type:    parseType(raw),
+        budget:  parseBudget(raw),
       });
     });
 
