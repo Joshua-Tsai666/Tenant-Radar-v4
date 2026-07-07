@@ -95,6 +95,65 @@ const BASE_HEADERS = {
   'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
 };
 
+// ─── 免費公開台灣/亞洲 Proxy 清單（自動輪替）──────────────
+// 使用 HTTPS CONNECT tunnel 讓請求看起來像從亞洲發出
+// 若所有 Proxy 都失敗，自動 fallback 直連
+const PROXY_LIST = [
+  // 從環境變數讀取（Railway 可設定自己的付費 Proxy）
+  ...(process.env.PROXY_URL ? [process.env.PROXY_URL] : []),
+  // 免費公開 Proxy（不穩定，僅作備用）
+  'http://103.152.112.162:80',
+  'http://103.122.168.226:80',
+  'http://202.28.19.195:8080',
+];
+
+let proxyIdx = 0;
+
+// 建立帶 Proxy 的 axios instance
+function makeProxyHttp(proxyUrl) {
+  try {
+    const { HttpsProxyAgent } = require('https-proxy-agent');
+    const agent = new HttpsProxyAgent(proxyUrl);
+    return axios.create({
+      timeout: 18000,
+      headers: BASE_HEADERS,
+      httpsAgent: agent,
+      httpAgent:  agent,
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
+// 帶自動重試的 GET（先用 Proxy，失敗則直連）
+async function resilientGet(url, options = {}) {
+  // 先嘗試直連
+  try {
+    const res = await http.get(url, { ...options, timeout: 12000 });
+    return res;
+  } catch (directErr) {
+    console.log(`直連失敗 ${url.split('/').slice(0,3).join('/')}，嘗試 Proxy…`);
+  }
+
+  // 直連失敗，嘗試 Proxy 清單
+  for (let i = 0; i < PROXY_LIST.length; i++) {
+    const proxy = PROXY_LIST[(proxyIdx + i) % PROXY_LIST.length];
+    try {
+      const proxyHttp = makeProxyHttp(proxy);
+      if (!proxyHttp) continue;
+      const res = await proxyHttp.get(url, { ...options, timeout: 18000 });
+      proxyIdx = (proxyIdx + i + 1) % PROXY_LIST.length; // 成功則切換到下一個
+      console.log(`Proxy 成功：${proxy}`);
+      return res;
+    } catch (_) {
+      console.log(`Proxy 失敗：${proxy}`);
+    }
+  }
+
+  // 所有 Proxy 都失敗，再試一次直連
+  return await http.get(url, options);
+}
+
 const http = axios.create({ timeout: 14000, headers: BASE_HEADERS });
 
 // ══════════════════════════════════════════════════════════
@@ -103,7 +162,7 @@ const http = axios.create({ timeout: 14000, headers: BASE_HEADERS });
 async function crawlPTT(board) {
   const out = [];
   try {
-    const listRes = await http.get(
+    const listRes = await resilientGet(
       `https://www.ptt.cc/bbs/${board}/index.html`,
       { headers: { Cookie: 'over18=1' } }
     );
@@ -121,7 +180,7 @@ async function crawlPTT(board) {
     for (const { href, title } of links.slice(0, 10)) {
       try {
         const url = `https://www.ptt.cc${href}`;
-        const pr  = await http.get(url, { headers: { Cookie: 'over18=1' } });
+        const pr  = await resilientGet(url, { headers: { Cookie: 'over18=1' } });
         const $p  = cheerio.load(pr.data);
         const raw = $p('#main-content').text().replace(/--[\s\S]*$/, '').trim();
         const author  = $p('.article-meta-value').eq(0).text().trim();
@@ -150,7 +209,7 @@ async function crawlPTT(board) {
 async function crawlDcard() {
   const out = [];
   try {
-    const res = await http.get(
+    const res = await resilientGet(
       'https://www.dcard.tw/_api/forums/rent/posts?limit=30&popular=false',
       { headers: { Referer: 'https://www.dcard.tw/f/rent', Origin: 'https://www.dcard.tw' } }
     );
@@ -179,7 +238,7 @@ async function crawlDcard() {
 async function crawl591() {
   const out = [];
   try {
-    const res = await http.get(
+    const res = await resilientGet(
       'https://rent.591.com.tw/home.php?func=demand&kind=0&region=1',
       { headers: { Referer: 'https://rent.591.com.tw/', Cookie: '591_new_session=1' } }
     );
