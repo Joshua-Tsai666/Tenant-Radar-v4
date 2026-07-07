@@ -28,8 +28,23 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://joshua-tsai666.github.io',
+    'http://localhost:3001',
+    'http://127.0.0.1:5500',
+    /\.railway\.app$/,
+  ],
+  credentials: true,
+}));
 app.use(express.json());
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
 
 // ─── Gemini ────────────────────────────────────────────────
 let genAI = null;
